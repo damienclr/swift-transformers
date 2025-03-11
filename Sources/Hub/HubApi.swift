@@ -155,6 +155,115 @@ public extension HubApi {
     func getFilenames(from repoId: String, matching glob: String) async throws -> [String] {
         return try await getFilenames(from: Repo(id: repoId), matching: [glob])
     }
+    
+    // NOUVELLE MÉTHODE - Téléchargement depuis Cloudflare R2
+    @discardableResult
+    func snapshotFromCloudflare(from repoId: String, r2BaseURL: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+        let repo = Hub.Repo(id: repoId)
+        let repoDestination = localRepoLocation(repo)
+        
+        // Fichiers requis pour le modèle
+        let requiredFiles = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
+        
+        // Si les fichiers existent déjà, on ne télécharge pas à nouveau
+        if useOfflineMode ?? NetworkMonitor.shared.shouldUseOfflineMode() {
+            if FileManager.default.fileExists(atPath: repoDestination.path) {
+                // Vérifie si tous les fichiers existent
+                let allFilesExist = requiredFiles.allSatisfy { fileName in
+                    let filePath = repoDestination.appendingPathComponent(fileName).path
+                    return FileManager.default.fileExists(atPath: filePath)
+                }
+                
+                if allFilesExist {
+                    return repoDestination
+                }
+            }
+            throw EnvironmentError.offlineModeError("Fichiers non disponibles en mode hors ligne")
+        }
+        
+        // Crée le répertoire de destination s'il n'existe pas
+        try FileManager.default.createDirectory(at: repoDestination, withIntermediateDirectories: true, attributes: nil)
+        
+        let totalProgress = Progress(totalUnitCount: Int64(requiredFiles.count))
+        for (index, fileName) in requiredFiles.enumerated() {
+            let sourceURL = URL(string: "\(r2BaseURL)/\(fileName)")!
+            let destinationURL = repoDestination.appendingPathComponent(fileName)
+            
+            print("📥 Downloading \(fileName) from Cloudflare R2: \(sourceURL)")
+            
+            let fileProgress = Progress(totalUnitCount: 100, parent: totalProgress, pendingUnitCount: 1)
+            try await downloadFileFromR2(from: sourceURL, to: destinationURL) { progress in
+                fileProgress.completedUnitCount = Int64(progress * 100)
+                progressHandler(totalProgress)
+            }
+            
+            // Create metadata files to simulate HubApi download
+            try writeSimulatedMetadata(for: fileName, in: repoDestination)
+            
+            print("✅ Downloaded \(fileName) successfully (\(index + 1)/\(requiredFiles.count))")
+            fileProgress.completedUnitCount = 100
+        }
+        
+        return repoDestination
+    }
+    
+    // Simule l'écriture des métadonnées comme si les fichiers venaient de HF
+    private func writeSimulatedMetadata(for fileName: String, in directory: URL) throws {
+        let metadataDir = directory
+            .appendingPathComponent(".cache")
+            .appendingPathComponent("huggingface")
+            .appendingPathComponent("download")
+        
+        try FileManager.default.createDirectory(at: metadataDir, withIntermediateDirectories: true, attributes: nil)
+        
+        let metadataPath = metadataDir.appendingPathComponent("\(fileName).metadata")
+        let metadataContent = "dummy_commit_hash\ndummy_etag\n\(Date().timeIntervalSince1970)\n"
+        try metadataContent.write(to: metadataPath, atomically: true, encoding: .utf8)
+    }
+    
+    // Télécharge un fichier depuis Cloudflare R2 avec suivi de progression
+    private func downloadFileFromR2(from sourceURL: URL, to destinationURL: URL, progressHandler: @escaping (Double) -> Void) async throws {
+        let downloadTask = URLSession.shared.downloadTask(with: sourceURL)
+        
+        // Create an observation task for progress
+        let observation = Task<Void, Error> {
+            for await progress in downloadTask.progress {
+                progressHandler(progress.fractionCompleted)
+            }
+        }
+        
+        // Start download task
+        downloadTask.resume()
+        
+        // Wait for completion with timeout
+        return try await withCheckedThrowingContinuation { continuation in
+            downloadTask.completionHandler = { url, response, error in
+                observation.cancel()  // Cancel the observation when download completes
+                
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode),
+                      let url = url else {
+                    continuation.resume(throwing: Hub.HubClientError.unexpectedError)
+                    return
+                }
+                
+                do {
+                    if FileManager.default.fileExists(atPath: destinationURL.path) {
+                        try FileManager.default.removeItem(at: destinationURL)
+                    }
+                    try FileManager.default.moveItem(at: url, to: destinationURL)
+                    continuation.resume(returning: ())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 /// Additional Errors
@@ -292,8 +401,10 @@ public extension HubApi {
             hasher.update(data: nextChunk)
             
             return true
-        }) { }
-        
+        }) {
+            
+        }
+            
         let digest = hasher.finalize()
         return digest.map { String(format: "%02x", $0) }.joined()
     }
@@ -419,6 +530,12 @@ public extension HubApi {
 
     @discardableResult
     func snapshot(from repo: Repo, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+        // NOTE: Pour les fichiers de modèle, nous allons vérifier s'il faut utiliser snapshotFromCloudflare à la place
+        if repo.id == "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit" {
+            return try await snapshotFromCloudflare(from: repo.id, r2BaseURL: "https://appcaptainshot.frenchpavillon.com", progressHandler: progressHandler)
+        }
+        
+        // Ancien code pour les autres modèles
         let repoDestination = localRepoLocation(repo)
         let repoMetadataDestination = repoDestination
             .appendingPathComponent(".cache")
@@ -437,7 +554,7 @@ public extension HubApi {
             
             for fileUrl in fileUrls {
                 let metadataPath = URL(fileURLWithPath: fileUrl.path.replacingOccurrences(
-                    of: repoDestination.path, 
+                    of: repoDestination.path,
                     with: repoMetadataDestination.path
                 ) + ".metadata")
                 
@@ -485,6 +602,10 @@ public extension HubApi {
     
     @discardableResult
     func snapshot(from repoId: String, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+        // NOTE: Pour le modèle spécifique, utiliser directement snapshotFromCloudflare
+        if repoId == "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit" {
+            return try await snapshotFromCloudflare(from: repoId, r2BaseURL: "https://appcaptainshot.frenchpavillon.com", progressHandler: progressHandler)
+        }
         return try await snapshot(from: Repo(id: repoId), matching: globs, progressHandler: progressHandler)
     }
     
@@ -538,6 +659,17 @@ public extension HubApi {
     }
     
     func getFileMetadata(url: URL) async throws -> FileMetadata {
+        // Pour les URLs de notre bucket Cloudflare, retourner des métadonnées factices
+        if url.absoluteString.starts(with: "https://appcaptainshot.frenchpavillon.com") {
+            return FileMetadata(
+                commitHash: "dummy_commit_hash",
+                etag: "dummy_etag",
+                location: url.absoluteString,
+                size: nil
+            )
+        }
+        
+        // Sinon, utiliser le comportement normal
         let (_, response) = try await httpHead(for: url)
         let location = response.statusCode == 302 ? response.value(forHTTPHeaderField: "Location") : response.url?.absoluteString
         
@@ -751,3 +883,48 @@ private class RedirectDelegate: NSObject, URLSessionTaskDelegate {
         completionHandler(nil)
     }
 }
+
+// Extension pour URLSessionTask.progress
+extension URLSessionTask {
+    var progress: AsyncStream<Progress> {
+        AsyncStream { continuation in
+            let observation = self.progress.observe(\.fractionCompleted) { progress, _ in
+                continuation.yield(progress)
+            }
+            continuation.onTermination = { _ in
+                observation.invalidate()
+            }
+        }
+    }
+    
+    var completionHandler: ((URL?, URLResponse?, Error?) -> Void)? {
+        get { nil } // This is just a placeholder
+        set {
+            if let newValue = newValue {
+                // Store the completion handler
+                objc_setAssociatedObject(self, UnsafeRawPointer(bitPattern: 1)!, newValue, .OBJC_ASSOCIATION_RETAIN)
+                
+                // Set up the completion handler
+                self.delegate = URLSessionTaskDelegateImpl(completionHandler: newValue)
+            }
+        }
+    }
+}
+
+private class URLSessionTaskDelegateImpl: NSObject, URLSessionTaskDelegate {
+    let completionHandler: (URL?, URLResponse?, Error?) -> Void
+    
+    init(completionHandler: @escaping (URL?, URLResponse?, Error?) -> Void) {
+        self.completionHandler = completionHandler
+        super.init()
+    }
+    
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        completionHandler(nil, task.response, error)
+    }
+    
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        completionHandler(location, downloadTask.response, nil)
+    }
+}
+
