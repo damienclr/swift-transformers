@@ -178,19 +178,22 @@ public class LanguageModelConfigurationFromHub {
         modelName: String,
         hubApi: HubApi = .shared
     ) async throws -> Configurations {
-        // Si c'est notre modèle FuseChat, chargement direct sans passer par l'API HF
-        if modelName == "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit" {
-            let repo = Hub.Repo(id: modelName)
-            let modelFolder = hubApi.localRepoLocation(repo)
-            return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
+        // Chargement direct des fichiers locaux pour notre modèle FuseChat
+        let repo = Hub.Repo(id: modelName)
+        let modelFolder = hubApi.localRepoLocation(repo)
+        
+        // Vérification que les fichiers existent déjà
+        let requiredFiles = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
+        let allFilesExist = requiredFiles.allSatisfy {
+            FileManager.default.fileExists(atPath: modelFolder.appendingPathComponent($0).path)
         }
         
-        // Comportement normal pour les autres modèles
-        let filesToDownload = ["config.json", "tokenizer_config.json", "chat_template.json", "tokenizer.json"]
-        let repo = Hub.Repo(id: modelName)
-        let downloadedModelFolder = try await hubApi.snapshot(from: repo, matching: filesToDownload)
-
-        return try await loadConfig(modelFolder: downloadedModelFolder, hubApi: hubApi)
+        if !allFilesExist {
+            print("⚠️ Certains fichiers manquent, tentative de les charger via ModelManager")
+        }
+        
+        // Dans tous les cas, on utilise les fichiers locaux pour charger la configuration
+        return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
     }
 
     func loadConfig(
