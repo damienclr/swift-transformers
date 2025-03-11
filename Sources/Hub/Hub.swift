@@ -15,7 +15,6 @@ public extension Hub {
         case authorizationRequired
         case unexpectedError
         case httpStatusCode(Int)
-        case cloudflareR2Error(String) // Ajout d'une erreur pour Cloudflare R2
     }
     
     enum RepoType: String {
@@ -182,17 +181,6 @@ public class LanguageModelConfigurationFromHub {
         let repo = Hub.Repo(id: modelName)
         let modelFolder = hubApi.localRepoLocation(repo)
         
-        // Vérification que les fichiers existent déjà
-        let requiredFiles = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
-        let allFilesExist = requiredFiles.allSatisfy {
-            FileManager.default.fileExists(atPath: modelFolder.appendingPathComponent($0).path)
-        }
-        
-        if !allFilesExist {
-            print("⚠️ Certains fichiers manquent, tentative de les charger via ModelManager")
-        }
-        
-        // Dans tous les cas, on utilise les fichiers locaux pour charger la configuration
         return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
     }
 
@@ -208,7 +196,6 @@ public class LanguageModelConfigurationFromHub {
         // Check for chat template and merge if available
         if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
            let chatTemplate = chatTemplateConfig.chatTemplate?.stringValue {
-            // The value of chat_template could also be an array of strings, but we're not handling that case here, since it's discouraged.
             // Create or update tokenizer config with chat template
             if var configDict = tokenizerConfig?.dictionary {
                 configDict["chat_template"] = chatTemplate
@@ -236,3 +223,4 @@ public class LanguageModelConfigurationFromHub {
         }
     }
 }
+
