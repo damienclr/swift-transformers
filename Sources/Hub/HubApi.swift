@@ -17,6 +17,8 @@ public struct HubApi {
     // Nom du modèle à gérer spécialement pour Cloudflare
     private static let cloudflareModelId = "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit"
     
+    public typealias Repo = Hub.Repo  // Ajout de la référence au type Repo
+    
     public init(downloadBase: URL? = nil, hfToken: String? = nil, endpoint: String = "https://huggingface.co") {
         self.hfToken = hfToken
         if let downloadBase {
@@ -35,7 +37,7 @@ public struct HubApi {
 
 /// File retrieval
 public extension HubApi {
-    func getFilenames(from repo: Repo, matching globs: [String] = []) async throws -> [String] {
+    func getFilenames(from repo: Hub.Repo, matching globs: [String] = []) async throws -> [String] {  // Utilisation de Hub.Repo au lieu de Repo
         // Pour notre modèle spécifique, retourner une liste fixe de fichiers
         if repo.id == HubApi.cloudflareModelId {
             return ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
@@ -45,15 +47,15 @@ public extension HubApi {
     }
     
     func getFilenames(from repoId: String, matching globs: [String] = []) async throws -> [String] {
-        return try await getFilenames(from: Repo(id: repoId), matching: globs)
+        return try await getFilenames(from: Hub.Repo(id: repoId), matching: globs)  // Utilisation de Hub.Repo
     }
     
-    func getFilenames(from repo: Repo, matching glob: String) async throws -> [String] {
+    func getFilenames(from repo: Hub.Repo, matching glob: String) async throws -> [String] {  // Utilisation de Hub.Repo
         return try await getFilenames(from: repo, matching: [glob])
     }
     
     func getFilenames(from repoId: String, matching glob: String) async throws -> [String] {
-        return try await getFilenames(from: Repo(id: repoId), matching: [glob])
+        return try await getFilenames(from: Hub.Repo(id: repoId), matching: glob)  // Utilisation de Hub.Repo
     }
 }
 
@@ -77,7 +79,7 @@ public extension HubApi {
 public extension HubApi {
     /// Assumes the file has already been downloaded.
     /// `filename` is relative to the download base.
-    func configuration(from filename: String, in repo: Repo) throws -> Config {
+    func configuration(from filename: String, in repo: Hub.Repo) throws -> Config {  // Utilisation de Hub.Repo
         let fileURL = localRepoLocation(repo).appending(path: filename)
         return try configuration(fileURL: fileURL)
     }
@@ -94,7 +96,7 @@ public extension HubApi {
 
 /// Repository location
 public extension HubApi {
-    func localRepoLocation(_ repo: Repo) -> URL {
+    func localRepoLocation(_ repo: Hub.Repo) -> URL {  // Utilisation de Hub.Repo
         downloadBase.appending(component: repo.type.rawValue).appending(component: repo.id)
     }
     
@@ -128,7 +130,7 @@ public extension HubApi {
     }
 
     @discardableResult
-    func snapshot(from repo: Repo, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+    func snapshot(from repo: Hub.Repo, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {  // Utilisation de Hub.Repo
         // Pour FuseChat, on retourne simplement l'emplacement sans télécharger
         // Le téléchargement se fait dans LLMManager.initialize()
         if repo.id == HubApi.cloudflareModelId {
@@ -147,17 +149,17 @@ public extension HubApi {
     
     @discardableResult
     func snapshot(from repoId: String, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
-        return try await snapshot(from: Repo(id: repoId), matching: globs, progressHandler: progressHandler)
+        return try await snapshot(from: Hub.Repo(id: repoId), matching: globs, progressHandler: progressHandler)  // Utilisation de Hub.Repo
     }
     
     @discardableResult
-    func snapshot(from repo: Repo, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+    func snapshot(from repo: Hub.Repo, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {  // Utilisation de Hub.Repo
         return try await snapshot(from: repo, matching: [glob], progressHandler: progressHandler)
     }
     
     @discardableResult
     func snapshot(from repoId: String, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
-        return try await snapshot(from: Repo(id: repoId), matching: [glob], progressHandler: progressHandler)
+        return try await snapshot(from: Hub.Repo(id: repoId), matching: [glob], progressHandler: progressHandler)  // Utilisation de Hub.Repo
     }
 }
 
@@ -208,7 +210,7 @@ public extension HubApi {
         throw Hub.HubClientError.unexpectedError
     }
     
-    func getFileMetadata(from repo: Repo, matching globs: [String] = []) async throws -> [FileMetadata] {
+    func getFileMetadata(from repo: Hub.Repo, matching globs: [String] = []) async throws -> [FileMetadata] {  // Utilisation de Hub.Repo
         // Pour notre modèle FuseChat spécifique, retourner des métadonnées factices
         if repo.id == HubApi.cloudflareModelId {
             let files = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
@@ -226,15 +228,15 @@ public extension HubApi {
     }
     
     func getFileMetadata(from repoId: String, matching globs: [String] = []) async throws -> [FileMetadata] {
-        return try await getFileMetadata(from: Repo(id: repoId), matching: globs)
+        return try await getFileMetadata(from: Hub.Repo(id: repoId), matching: globs)  // Utilisation de Hub.Repo
     }
     
-    func getFileMetadata(from repo: Repo, matching glob: String) async throws -> [FileMetadata] {
+    func getFileMetadata(from repo: Hub.Repo, matching glob: String) async throws -> [FileMetadata] {  // Utilisation de Hub.Repo
         return try await getFileMetadata(from: repo, matching: [glob])
     }
     
     func getFileMetadata(from repoId: String, matching glob: String) async throws -> [FileMetadata] {
-        return try await getFileMetadata(from: Repo(id: repoId), matching: [glob])
+        return try await getFileMetadata(from: Hub.Repo(id: repoId), matching: [glob])  // Utilisation de Hub.Repo
     }
 }
 
@@ -245,51 +247,51 @@ public extension Hub {
     }
     
     static func getFilenames(from repoId: String, matching globs: [String] = []) async throws -> [String] {
-        return try await HubApi.shared.getFilenames(from: Repo(id: repoId), matching: globs)
+        return try await HubApi.shared.getFilenames(from: Hub.Repo(id: repoId), matching: globs)  // Utilisation de Hub.Repo
     }
     
-    static func getFilenames(from repo: Repo, matching glob: String) async throws -> [String] {
+    static func getFilenames(from repo: Hub.Repo, matching glob: String) async throws -> [String] {  // Utilisation de Hub.Repo
         return try await HubApi.shared.getFilenames(from: repo, matching: glob)
     }
     
     static func getFilenames(from repoId: String, matching glob: String) async throws -> [String] {
-        return try await HubApi.shared.getFilenames(from: Repo(id: repoId), matching: glob)
+        return try await HubApi.shared.getFilenames(from: Hub.Repo(id: repoId), matching: glob)  // Utilisation de Hub.Repo
     }
     
-    static func snapshot(from repo: Repo, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+    static func snapshot(from repo: Hub.Repo, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
         return try await HubApi.shared.snapshot(from: repo, matching: globs, progressHandler: progressHandler)
     }
     
     static func snapshot(from repoId: String, matching globs: [String] = [], progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
-        return try await HubApi.shared.snapshot(from: Repo(id: repoId), matching: globs, progressHandler: progressHandler)
+        return try await HubApi.shared.snapshot(from: Hub.Repo(id: repoId), matching: globs, progressHandler: progressHandler)  // Utilisation de Hub.Repo
     }
     
-    static func snapshot(from repo: Repo, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
+    static func snapshot(from repo: Hub.Repo, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
         return try await HubApi.shared.snapshot(from: repo, matching: glob, progressHandler: progressHandler)
     }
     
     static func snapshot(from repoId: String, matching glob: String, progressHandler: @escaping (Progress) -> Void = { _ in }) async throws -> URL {
-        return try await HubApi.shared.snapshot(from: Repo(id: repoId), matching: glob, progressHandler: progressHandler)
+        return try await HubApi.shared.snapshot(from: Hub.Repo(id: repoId), matching: glob, progressHandler: progressHandler)  // Utilisation de Hub.Repo
     }
     
     static func getFileMetadata(fileURL: URL) async throws -> HubApi.FileMetadata {
         return try await HubApi.shared.getFileMetadata(url: fileURL)
     }
     
-    static func getFileMetadata(from repo: Repo, matching globs: [String] = []) async throws -> [HubApi.FileMetadata] {
+    static func getFileMetadata(from repo: Hub.Repo, matching globs: [String] = []) async throws -> [HubApi.FileMetadata] {
         return try await HubApi.shared.getFileMetadata(from: repo, matching: globs)
     }
     
     static func getFileMetadata(from repoId: String, matching globs: [String] = []) async throws -> [HubApi.FileMetadata] {
-        return try await HubApi.shared.getFileMetadata(from: Repo(id: repoId), matching: globs)
+        return try await HubApi.shared.getFileMetadata(from: Hub.Repo(id: repoId), matching: globs)  // Utilisation de Hub.Repo
     }
     
-    static func getFileMetadata(from repo: Repo, matching glob: String) async throws -> [HubApi.FileMetadata] {
+    static func getFileMetadata(from repo: Hub.Repo, matching glob: String) async throws -> [HubApi.FileMetadata] {
         return try await HubApi.shared.getFileMetadata(from: repo, matching: [glob])
     }
     
     static func getFileMetadata(from repoId: String, matching glob: String) async throws -> [HubApi.FileMetadata] {
-        return try await HubApi.shared.getFileMetadata(from: Repo(id: repoId), matching: [glob])
+        return try await HubApi.shared.getFileMetadata(from: Hub.Repo(id: repoId), matching: [glob])  // Utilisation de Hub.Repo
     }
 }
 
@@ -320,4 +322,3 @@ public extension FileManager {
         return fileUrls
     }
 }
-
