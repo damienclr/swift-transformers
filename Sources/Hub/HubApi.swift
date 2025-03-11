@@ -141,6 +141,18 @@ public extension HubApi {
                 try FileManager.default.createDirectory(at: repoDestination, withIntermediateDirectories: true)
             }
             
+            // Si les fichiers sont déjà présents, pas besoin de connexion internet
+            let requiredFiles = ["config.json", "tokenizer.json", "tokenizer_config.json", "model.safetensors"]
+            let filesExist = requiredFiles.allSatisfy { fileName in
+                FileManager.default.fileExists(atPath: repoDestination.appendingPathComponent(fileName).path)
+            }
+            
+            if filesExist {
+                print("✅ All model files already exist locally, no internet connection needed")
+            } else {
+                print("⚠️ Some model files are missing, internet connection will be needed for download")
+            }
+            
             return repoDestination
         }
         
