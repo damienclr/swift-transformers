@@ -1,6 +1,6 @@
 //
 //  Hub.swift
-//
+//  
 //
 //  Created by Pedro Cuenca on 18/5/23.
 //
@@ -118,11 +118,6 @@ public class LanguageModelConfigurationFromHub {
         hubApi: HubApi = .shared
     ) {
         self.configPromise = Task.init {
-            // Pour le modèle spécifique, utiliser loadConfigFromCloudflare
-            if modelName == "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit" {
-                return try await self.loadConfigFromCloudflare(r2BaseURL: "https://appcaptainshot.frenchpavillon.com", hubApi: hubApi)
-            }
-            // Sinon utiliser loadConfig normal
             return try await self.loadConfig(modelName: modelName, hubApi: hubApi)
         }
     }
@@ -183,23 +178,18 @@ public class LanguageModelConfigurationFromHub {
         modelName: String,
         hubApi: HubApi = .shared
     ) async throws -> Configurations {
+        // Si c'est notre modèle FuseChat, chargement direct sans passer par l'API HF
+        if modelName == "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit" {
+            let repo = Hub.Repo(id: modelName)
+            let modelFolder = hubApi.localRepoLocation(repo)
+            return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
+        }
+        
+        // Comportement normal pour les autres modèles
         let filesToDownload = ["config.json", "tokenizer_config.json", "chat_template.json", "tokenizer.json"]
         let repo = Hub.Repo(id: modelName)
         let downloadedModelFolder = try await hubApi.snapshot(from: repo, matching: filesToDownload)
 
-        return try await loadConfig(modelFolder: downloadedModelFolder, hubApi: hubApi)
-    }
-    
-    // Nouvelle méthode pour charger la configuration depuis Cloudflare R2
-    func loadConfigFromCloudflare(
-        r2BaseURL: String,
-        hubApi: HubApi = .shared
-    ) async throws -> Configurations {
-        // Télécharger les fichiers depuis Cloudflare R2
-        let repo = Hub.Repo(id: "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit")
-        let downloadedModelFolder = try await hubApi.snapshotFromCloudflare(from: repo.id, r2BaseURL: r2BaseURL)
-        
-        // Utiliser la méthode existante pour charger la configuration à partir du dossier local
         return try await loadConfig(modelFolder: downloadedModelFolder, hubApi: hubApi)
     }
 
