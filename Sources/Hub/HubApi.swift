@@ -15,7 +15,7 @@ public struct HubApi {
     var endpoint: String
     
     // Nom du modèle à gérer spécialement pour Cloudflare
-    private static let cloudflareModelId = "mlx-community/FuseChat-Llama-3.2-3B-Instruct-4bit"
+    private static let cloudflareModelId = "mlx-community/Llama-3.2-3B-Instruct-4bit"
     
     public typealias Repo = Hub.Repo  // Ajout de la référence au type Repo
     
