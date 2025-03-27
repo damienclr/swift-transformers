@@ -7,12 +7,22 @@ public struct Hub {
     
     func loadConfig(modelFolder: URL) async throws -> Configuration {
         let configPath = modelFolder.appendingPathComponent("config.json")
-        let tokenizerConfigPath = modelFolder.appendingPathComponent("tokenizer_config.json")
+        let tokenizerConfigPath = modelFolder.appendingPathComponent("tokenizer_config.json") 
         let tokenizerPath = modelFolder.appendingPathComponent("tokenizer.json")
         
         guard FileManager.default.fileExists(atPath: configPath.path),
               FileManager.default.fileExists(atPath: tokenizerPath.path) else {
             throw HubClientError.unexpectedError
+        }
+        
+        // Add this function in Hub
+        func configuration(fileURL: URL) throws -> Config {
+            let data = try Data(contentsOf: fileURL)
+            let parsed = try JSONSerialization.jsonObject(with: data)
+            guard let dictionary = parsed as? [NSString: Any] else {
+                throw HubClientError.unexpectedError
+            }
+            return Config(dictionary)
         }
         
         let modelConfig = try configuration(fileURL: configPath)
