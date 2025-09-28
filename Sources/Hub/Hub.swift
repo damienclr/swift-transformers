@@ -1,190 +1,317 @@
 import Foundation
 
-public struct Hub {}
+/// A namespace struct providing access to Hugging Face Hub functionality.
+///
+/// The Hub struct serves as the entry point for interacting with the Hugging Face model repository,
+/// providing static methods for downloading models, retrieving file metadata, and managing repository snapshots.
+/// All operations are performed through the shared HubApi instance unless specified otherwise.
+public enum Hub {}
 
 public extension Hub {
-    enum HubClientError: Error {
-        case parse
-        case authorizationRequired
-        case unexpectedError
-        case httpStatusCode(Int)
-    }
-    
-    enum RepoType: String {
-        case models
-        case datasets
-        case spaces
-    }
-    
-    struct Repo {
-        public let id: String
-        public let type: RepoType
-        
-        public init(id: String, type: RepoType = .models) {
-            self.id = id
-            self.type = type
-        }
-    }
-}
+  /// Errors that can occur during Hub client operations.
+  ///
+  /// This enumeration covers all possible error conditions that may arise when
+  /// interacting with the Hugging Face Hub, including network issues, authentication
+  /// problems, file system errors, and parsing failures.
+  enum HubClientError: LocalizedError {
+      /// Authentication is required but no valid token was provided.
+      case authorizationRequired
+      /// An HTTP error occurred with the specified status code.
+      case httpStatusCode(Int)
+      /// Failed to parse server response or configuration data.
+      case parse
+      /// Expected json response could not be parsed as json.
+      case jsonSerialization(fileURL: URL, message: String)
+      /// An unexpected error occurred during operation.
+      case unexpectedError
+      /// A download operation failed with the specified error message.
+      case downloadError(String)
+      /// The requested file was not found on the server or locally.
+      case fileNotFound(String)
+      /// A network error occurred during communication.
+      case networkError(URLError)
+      /// The requested resource could not be found.
+      case resourceNotFound(String)
+      /// A required configuration file is missing.
+      case configurationMissing(String)
+      /// A file system operation failed.
+      case fileSystemError(Error)
+      /// Failed to parse data with the specified error message.
+      case parseError(String)
 
-// The conflicting Config struct that was previously here is REMOVED.
-// All references to 'Config' below will now resolve to the one from Config.txt
-
-public class LanguageModelConfigurationFromHub {
-    struct Configurations {
-        var modelConfig: Config // Now refers to the main Config from Config.txt
-        var tokenizerConfig: Config? // Now refers to the main Config from Config.txt
-        var tokenizerData: Config // Now refers to the main Config from Config.txt
-    }
-
-    private var configPromise: Task<Configurations, Error>? = nil
-
-    public init(
-        modelName: String,
-        hubApi: HubApi = .shared // Assuming HubApi is correctly using the main Config
-    ) {
-        self.configPromise = Task.init {
-            return try await self.loadConfig(modelName: modelName, hubApi: hubApi)
-        }
-    }
-    
-    public init(
-        modelFolder: URL,
-        hubApi: HubApi = .shared
-    ) {
-        self.configPromise = Task {
-            return try await self.loadConfig(modelFolder: modelFolder, hubApi: hubApi)
-        }
-    }
-
-    public var modelConfig: Config {
-        get async throws {
-            try await configPromise!.value.modelConfig
-        }
-    }
-
-    public var tokenizerConfig: Config? {
-        get async throws {
-            var loadedTokenizerConfig = try await configPromise!.value.tokenizerConfig
-
-            // If tokenizerClass is already present, return the loaded config
-           if let currentConfig = loadedTokenizerConfig, currentConfig.tokenizerClass?.string() != nil {
-              return currentConfig
+      public var errorDescription: String? {
+          switch self {
+          case .authorizationRequired:
+              String(localized: "Authentication required. Please provide a valid Hugging Face token.")
+          case let .httpStatusCode(code):
+              String(localized: "HTTP error with status code: \(code)")
+          case .parse:
+              String(localized: "Failed to parse server response.")
+          case .jsonSerialization(_, let message):
+              message
+          case .unexpectedError:
+              String(localized: "An unexpected error occurred.")
+          case let .downloadError(message):
+              String(localized: "Download failed: \(message)")
+          case let .fileNotFound(filename):
+              String(localized: "File not found: \(filename)")
+          case let .networkError(error):
+              String(localized: "Network error: \(error.localizedDescription)")
+          case let .resourceNotFound(resource):
+              String(localized: "Resource not found: \(resource)")
+          case let .configurationMissing(file):
+              String(localized: "Required configuration file missing: \(file)")
+          case let .fileSystemError(error):
+              String(localized: "File system error: \(error.localizedDescription)")
+          case let .parseError(message):
+              String(localized: "Parse error: \(message)")
           }
-
-
-            guard let modelType = try await modelType else {
-                // Cannot determine modelType, return original (possibly nil or without tokenizerClass)
-                return loadedTokenizerConfig
-            }
-
-   var baseDict: [String: Any] = [:]
-          if let configToConvert = loadedTokenizerConfig {
-              // Use jinjaValue to get a dictionary representation
-              let jinjaValue = configToConvert.jinjaValue()
-              if case let .object(objectValue) = jinjaValue {
-                  baseDict = objectValue.dictionary
-              }
-          }
-
-            
-            var effectiveDict = baseDict
-
-          if let fallbackModelSpecificConfig = Self.fallbackTokenizerConfig(for: modelType) {
-               let fallbackJinjaValue = fallbackModelSpecificConfig.jinjaValue()
-               if case let .object(fallbackObjectValue) = fallbackJinjaValue {
-                  let fallbackDict = fallbackObjectValue.dictionary
-                  // Merge: fallback provides defaults, baseDict (from file) overrides/adds.
-                  // The original was: fallbackConfig.dictionary.merging(hubConfig.dictionary...)
-                  // which means hubConfig (our baseDict) takes precedence for shared keys.
-                  effectiveDict = fallbackDict.merging(baseDict, uniquingKeysWith: { _, newFromFile in newFromFile })
-               }
-          }
-
-            
-            // Ensure tokenizer_class is set if not present after merge or if no fallback merge happened
-            if effectiveDict["tokenizer_class"] == nil && !(effectiveDict["tokenizer_class"] is NSNull) {
-                 effectiveDict["tokenizer_class"] = "\(modelType.capitalized)Tokenizer"
-            }
-            
-            // Convert the dictionary back to the main Config type
-            // The main Config has an init([NSString: Any]) which uses convertToBinaryDistinctKeys internally.
-            // We need to ensure values are appropriate. convertToBinaryDistinctKeys handles nested Configs and basic types.
-            let nsStringDict = Dictionary(uniqueKeysWithValues: effectiveDict.map { (NSString(string: $0.key), $0.value) })
-            return Config(nsStringDict)
-        }
-    }
-
-    public var tokenizerData: Config {
-        get async throws {
-            try await configPromise!.value.tokenizerData
-        }
-    }
-
-public var modelType: String? {
-      get async throws {
-          // Access modelType property and get its string value
-          try await modelConfig.modelType?.string()
       }
   }
 
+  /// The type of repository on the Hugging Face Hub.
+  enum RepoType: String, Codable {
+      /// Model repositories containing machine learning models.
+      case models
+      /// Dataset repositories containing training and evaluation data.
+      case datasets
+      /// Spaces repositories containing applications and demos.
+      case spaces
+  }
 
-    func loadConfig(
-        modelName: String,
-        hubApi: HubApi = .shared
-    ) async throws -> Configurations {
-        let repo = Hub.Repo(id: modelName)
-        // Assuming hubApi.localRepoLocation and hubApi.configuration are compatible with the main Config
-        let modelFolder = hubApi.localRepoLocation(repo)
-        
-        return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
-    }
+  /// Represents a repository on the Hugging Face Hub.
+  ///
+  /// A repository is identified by its unique ID and type, allowing access to
+  /// different kinds of resources hosted on the Hub platform.
+  struct Repo: Codable {
+      /// The unique identifier for the repository (e.g., "microsoft/DialoGPT-medium").
+      public let id: String
+      /// The type of repository (models, datasets, or spaces).
+      public let type: RepoType
 
-    func loadConfig(
-        modelFolder: URL,
-        hubApi: HubApi = .shared
-    ) async throws -> Configurations {
-        let modelConfig = try hubApi.configuration(fileURL: modelFolder.appending(path: "config.json"))
-        let tokenizerData = try hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer.json"))
-        var tokenizerConfigFromFile = try? hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer_config.json"))
-        
-    if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
-         let chatTemplate = chatTemplateConfig.chatTemplate?.string() { // Get string value from Config
-          
-          var tempDict: [String: Any] = [:]
-          if let currentTokenizerConfig = tokenizerConfigFromFile {
-              let jinjaValue = currentTokenizerConfig.jinjaValue()
-              if case let .object(objectValue) = jinjaValue {
-                  tempDict = objectValue.dictionary
-              }
-          }
-          tempDict["chat_template"] = chatTemplate
-          
-          let nsStringDict = Dictionary(uniqueKeysWithValues: tempDict.map { (NSString(string: $0.key), $0.value) })
-          tokenizerConfigFromFile = Config(nsStringDict) // Recreate Config with the new chat_template
+      /// Creates a new repository reference.
+      ///
+      /// - Parameters:
+      ///   - id: The unique identifier for the repository
+      ///   - type: The type of repository (defaults to .models)
+      public init(id: String, type: RepoType = .models) {
+          self.id = id
+          self.type = type
       }
-
-        
-        return Configurations(
-            modelConfig: modelConfig,
-            tokenizerConfig: tokenizerConfigFromFile,
-            tokenizerData: tokenizerData
-        )
-    }
-
-    static func fallbackTokenizerConfig(for modelType: String) -> Config? {
-        // This should ideally be part of the Bundle for the swift-transformers package itself.
-        // Using Bundle.module assumes this code is within that package.
-        guard let url = Bundle.module.url(forResource: "\(modelType)_tokenizer_config", withExtension: "json") else { return nil }
-        do {
-            let data = try Data(contentsOf: url)
-            let parsed = try JSONSerialization.jsonObject(with: data, options: [])
-            guard let dictionary = parsed as? [NSString: Any] else { return nil }
-            // This will now use the main Config's initializer
-            return Config(dictionary)
-        } catch {
-            return nil
-        }
-    }
+  }
 }
 
+/// Manages language model configuration loading from the Hugging Face Hub.
+///
+/// This class handles the asynchronous loading and processing of model configurations,
+/// tokenizer configurations, and tokenizer data from either remote Hub repositories
+/// or local model directories. It provides fallback mechanisms for missing configurations
+/// and manages the complexities of different model types and their specific requirements.
+public final class LanguageModelConfigurationFromHub: Sendable {
+  struct Configurations {
+      var modelConfig: Config?
+      var tokenizerConfig: Config?
+      var tokenizerData: Config
+  }
+
+  private let configPromise: Task<Configurations, Error>
+
+  /// Initializes configuration loading from a remote Hub repository.
+  ///
+  /// - Parameters:
+  ///   - modelName: The name/ID of the model repository (e.g., "microsoft/DialoGPT-medium")
+  ///   - revision: The git revision to use (defaults to "main")
+  ///   - hubApi: The Hub API client to use (defaults to shared instance)
+  public init(
+      modelName: String,
+      revision: String = "main",
+      hubApi: HubApi = .shared
+  ) {
+      configPromise = Task.init {
+          try await Self.loadConfig(modelName: modelName, revision: revision, hubApi: hubApi)
+      }
+  }
+
+  /// Initializes configuration loading from a local model directory.
+  ///
+  /// - Parameters:
+  ///   - modelFolder: The local directory containing model configuration files
+  ///   - hubApi: The Hub API client to use for parsing configurations (defaults to shared instance)
+  public init(
+      modelFolder: URL,
+      hubApi: HubApi = .shared
+  ) {
+      configPromise = Task {
+          try await Self.loadConfig(modelFolder: modelFolder, hubApi: hubApi)
+      }
+  }
+
+  /// The main model configuration containing architecture and parameter settings.
+  ///
+  /// - Returns: The loaded model configuration
+  /// - Throws: Hub errors if configuration loading fails
+  public var modelConfig: Config? {
+      get async throws {
+          try await configPromise.value.modelConfig
+      }
+  }
+
+  /// The tokenizer configuration with automatic fallback handling.
+  ///
+  /// This property attempts to load the tokenizer configuration from the Hub,
+  /// applying fallback configurations when needed and inferring tokenizer classes
+  /// based on the model type when not explicitly specified.
+  ///
+  /// - Returns: The tokenizer configuration, or nil if not available
+  /// - Throws: Hub errors if configuration loading fails
+  public var tokenizerConfig: Config? {
+      get async throws {
+          if let hubConfig = try await configPromise.value.tokenizerConfig {
+              // Try to guess the class if it's not present and the modelType is
+              if hubConfig.tokenizerClass?.string() != nil { return hubConfig }
+              guard let modelType = try await modelType else { return hubConfig }
+
+              // If the config exists but doesn't contain a tokenizerClass, use a fallback config if we have it
+              if let fallbackConfig = Self.fallbackTokenizerConfig(for: modelType) {
+                  let configuration = fallbackConfig.dictionary()?.merging(hubConfig.dictionary() ?? [:], strategy: { current, _ in current }) ?? [:]
+                  return Config(configuration)
+              }
+
+              // Guess by capitalizing
+              var configuration = hubConfig.dictionary() ?? [:]
+              configuration[BinaryDistinctString("tokenizer_class")] = Config("\(modelType.capitalized)Tokenizer")
+              return Config(configuration)
+          }
+
+          // Fallback tokenizer config, if available
+          guard let modelType = try await modelType else { return nil }
+          return Self.fallbackTokenizerConfig(for: modelType)
+      }
+  }
+
+  /// The tokenizer data containing vocabulary and merge rules.
+  ///
+  /// - Returns: The loaded tokenizer data configuration
+  /// - Throws: Hub errors if configuration loading fails
+  public var tokenizerData: Config {
+      get async throws {
+          try await configPromise.value.tokenizerData
+      }
+  }
+
+  /// The model architecture type extracted from the configuration.
+  ///
+  /// - Returns: The model type string, or nil if not specified
+  /// - Throws: Hub errors if configuration loading fails
+  public var modelType: String? {
+      get async throws {
+          try await modelConfig?.modelType?.string()
+      }
+  }
+
+  static func loadConfig(
+      modelName: String,
+      revision: String,
+      hubApi: HubApi = .shared
+  ) async throws -> Configurations {
+      let repo = Hub.Repo(id: modelName)
+      // Utiliser la logique de bypass si c'est le bon model ID
+      let modelFolder = hubApi.localRepoLocation(repo)
+      
+      return try await loadConfig(modelFolder: modelFolder, hubApi: hubApi)
+  }
+
+  static func loadConfig(
+      modelFolder: URL,
+      hubApi: HubApi = .shared
+  ) async throws -> Configurations {
+      do {
+          // Load required configurations
+          let modelConfigURL = modelFolder.appending(path: "config.json")
+
+          var modelConfig: Config? = nil
+          if FileManager.default.fileExists(atPath: modelConfigURL.path) {
+              modelConfig = try hubApi.configuration(fileURL: modelConfigURL)
+          }
+
+          let tokenizerDataURL = modelFolder.appending(path: "tokenizer.json")
+          guard FileManager.default.fileExists(atPath: tokenizerDataURL.path) else {
+              throw Hub.HubClientError.configurationMissing("tokenizer.json")
+          }
+
+          let tokenizerData = try hubApi.configuration(fileURL: tokenizerDataURL)
+
+          // Load tokenizer config (optional)
+          var tokenizerConfig: Config? = nil
+          let tokenizerConfigURL = modelFolder.appending(path: "tokenizer_config.json")
+          if FileManager.default.fileExists(atPath: tokenizerConfigURL.path) {
+              tokenizerConfig = try hubApi.configuration(fileURL: tokenizerConfigURL)
+          }
+
+          // Check for chat template and merge if available
+          // Prefer .jinja template over .json template
+          var chatTemplate: String? = nil
+          let chatTemplateJinjaURL = modelFolder.appending(path: "chat_template.jinja")
+          let chatTemplateJsonURL = modelFolder.appending(path: "chat_template.json")
+
+          if FileManager.default.fileExists(atPath: chatTemplateJinjaURL.path) {
+              // Try to load .jinja template as plain text
+              chatTemplate = try? String(contentsOf: chatTemplateJinjaURL, encoding: .utf8)
+          } else if FileManager.default.fileExists(atPath: chatTemplateJsonURL.path),
+              let chatTemplateConfig = try? hubApi.configuration(fileURL: chatTemplateJsonURL)
+          {
+              // Fall back to .json template
+              chatTemplate = chatTemplateConfig.chatTemplate?.string()
+          }
+
+          if let chatTemplate {
+              // Create or update tokenizer config with chat template
+              if var configDict = tokenizerConfig?.dictionary() {
+                  configDict[BinaryDistinctString("chat_template")] = Config(chatTemplate)
+                  tokenizerConfig = Config(configDict)
+              } else {
+                  tokenizerConfig = Config([BinaryDistinctString("chat_template"): Config(chatTemplate)])
+              }
+          }
+
+          return Configurations(
+              modelConfig: modelConfig,
+              tokenizerConfig: tokenizerConfig,
+              tokenizerData: tokenizerData
+          )
+      } catch let error as Hub.HubClientError {
+          throw error
+      } catch {
+          if let nsError = error as NSError? {
+              if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoSuchFileError {
+                  throw Hub.HubClientError.fileSystemError(error)
+              } else if nsError.domain == "NSJSONSerialization" {
+                  throw Hub.HubClientError.parseError("Invalid JSON format: \(nsError.localizedDescription)")
+              }
+          }
+          throw Hub.HubClientError.fileSystemError(error)
+      }
+  }
+
+  static func fallbackTokenizerConfig(for modelType: String) -> Config? {
+      // Fallback tokenizer configuration files are located in the `Sources/Hub/Resources` directory
+      guard let url = Bundle.module.url(forResource: "\(modelType)_tokenizer_config", withExtension: "json") else {
+          return nil
+      }
+
+      do {
+          let data = try Data(contentsOf: url)
+          let parsed = try JSONSerialization.jsonObject(with: data, options: [])
+          guard let dictionary = parsed as? [NSString: Any] else {
+              throw Hub.HubClientError.parseError("Failed to parse fallback tokenizer config")
+          }
+          return Config(dictionary)
+      } catch let error as Hub.HubClientError {
+          print("Error loading fallback tokenizer config: \(error.localizedDescription)")
+          return nil
+      } catch {
+          print("Error loading fallback tokenizer config: \(error.localizedDescription)")
+          return nil
+      }
+  }
+}
