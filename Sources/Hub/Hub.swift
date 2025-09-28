@@ -68,9 +68,9 @@ public class LanguageModelConfigurationFromHub {
             var loadedTokenizerConfig = try await configPromise!.value.tokenizerConfig
 
             // If tokenizerClass is already present, return the loaded config
-            if let currentConfig = loadedTokenizerConfig, currentConfig.tokenizerClass?.string() != nil {
-                return currentConfig
-            }
+          if let currentConfig = loadedTokenizerConfig, currentConfig.tokenizerClass != nil {
+              return currentConfig
+          }
 
             guard let modelType = try await modelType else {
                 // Cannot determine modelType, return original (possibly nil or without tokenizerClass)
@@ -80,11 +80,11 @@ public class LanguageModelConfigurationFromHub {
             var baseDict: [String: Any] = [:]
             if let configToConvert = loadedTokenizerConfig {
                 // Use toJinjaCompatible to get a dictionary representation
-                if let dict = configToConvert.toJinjaCompatible() as? [String: Any] {
-                    baseDict = dict
-                } else if let str = configToConvert.string() { // Handle if it's just a string for some reason
-                     baseDict["value"] = str // Or handle appropriately
-                }
+         if let dict = configToConvert.toJinjaCompatible() as? [String: Any] {
+                  baseDict = dict
+              } else if let str = configToConvert as? String { // Handle if it's just a string for some reason
+                   baseDict["value"] = str // Or handle appropriately
+              }
             }
             
             var effectiveDict = baseDict
@@ -143,20 +143,20 @@ public class LanguageModelConfigurationFromHub {
         let tokenizerData = try hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer.json"))
         var tokenizerConfigFromFile = try? hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer_config.json"))
         
-        if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
-           let chatTemplate = chatTemplateConfig.chatTemplate?.string() { // Use .string() from main Config
-            
-            var tempDict: [String: Any] = [:]
-            if let currentTokenizerConfig = tokenizerConfigFromFile {
-                if let dict = currentTokenizerConfig.toJinjaCompatible() as? [String: Any] {
-                    tempDict = dict
-                }
-            }
-            tempDict["chat_template"] = chatTemplate
-            
-            let nsStringDict = Dictionary(uniqueKeysWithValues: tempDict.map { (NSString(string: $0.key), $0.value) })
-            tokenizerConfigFromFile = Config(nsStringDict) // Recreate Config with the new chat_template
-        }
+     if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
+         let chatTemplate = chatTemplateConfig.chatTemplate { // Use direct property access
+          
+          var tempDict: [String: Any] = [:]
+          if let currentTokenizerConfig = tokenizerConfigFromFile {
+              if let dict = currentTokenizerConfig.toJinjaCompatible() as? [String: Any] {
+                  tempDict = dict
+              }
+          }
+          tempDict["chat_template"] = chatTemplate
+          
+          let nsStringDict = Dictionary(uniqueKeysWithValues: tempDict.map { (NSString(string: $0.key), $0.value) })
+          tokenizerConfigFromFile = Config(nsStringDict) // Recreate Config with the new chat_template
+      }
         
         return Configurations(
             modelConfig: modelConfig,
