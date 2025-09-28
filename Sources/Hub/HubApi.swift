@@ -280,13 +280,6 @@ public struct XetFileData {
   let refreshRoute: String
 }
 
-/// JSONSerialization extension ajoutée pour compatibilité
-private extension JSONSerialization {
-  static func bomPreservingJsonObject(with data: Data, options opt: JSONSerialization.ReadingOptions = []) throws -> Any {
-      return try JSONSerialization.jsonObject(with: data, options: opt)
-  }
-}
-
 /// Stateless wrappers that use `HubApi` instances
 public extension Hub {
   static func getFilenames(from repo: Hub.Repo, matching globs: [String] = []) async throws -> [String] {
