@@ -68,35 +68,39 @@ public class LanguageModelConfigurationFromHub {
             var loadedTokenizerConfig = try await configPromise!.value.tokenizerConfig
 
             // If tokenizerClass is already present, return the loaded config
-          if let currentConfig = loadedTokenizerConfig, currentConfig.tokenizerClass != nil {
+           if let currentConfig = loadedTokenizerConfig, currentConfig.tokenizerClass?.string() != nil {
               return currentConfig
           }
+
 
             guard let modelType = try await modelType else {
                 // Cannot determine modelType, return original (possibly nil or without tokenizerClass)
                 return loadedTokenizerConfig
             }
 
-            var baseDict: [String: Any] = [:]
-            if let configToConvert = loadedTokenizerConfig {
-                // Use toJinjaCompatible to get a dictionary representation
-         if let dict = configToConvert.toJinjaCompatible() as? [String: Any] {
-                  baseDict = dict
-              } else if let str = configToConvert as? String { // Handle if it's just a string for some reason
-                   baseDict["value"] = str // Or handle appropriately
+   var baseDict: [String: Any] = [:]
+          if let configToConvert = loadedTokenizerConfig {
+              // Use jinjaValue to get a dictionary representation
+              let jinjaValue = configToConvert.jinjaValue()
+              if case let .object(objectValue) = jinjaValue {
+                  baseDict = objectValue.dictionary
               }
-            }
+          }
+
             
             var effectiveDict = baseDict
 
-            if let fallbackModelSpecificConfig = Self.fallbackTokenizerConfig(for: modelType) {
-                 if let fallbackDict = fallbackModelSpecificConfig.toJinjaCompatible() as? [String: Any] {
-                    // Merge: fallback provides defaults, baseDict (from file) overrides/adds.
-                    // The original was: fallbackConfig.dictionary.merging(hubConfig.dictionary...)
-                    // which means hubConfig (our baseDict) takes precedence for shared keys.
-                    effectiveDict = fallbackDict.merging(baseDict, uniquingKeysWith: { _, newFromFile in newFromFile })
-                 }
-            }
+          if let fallbackModelSpecificConfig = Self.fallbackTokenizerConfig(for: modelType) {
+               let fallbackJinjaValue = fallbackModelSpecificConfig.jinjaValue()
+               if case let .object(fallbackObjectValue) = fallbackJinjaValue {
+                  let fallbackDict = fallbackObjectValue.dictionary
+                  // Merge: fallback provides defaults, baseDict (from file) overrides/adds.
+                  // The original was: fallbackConfig.dictionary.merging(hubConfig.dictionary...)
+                  // which means hubConfig (our baseDict) takes precedence for shared keys.
+                  effectiveDict = fallbackDict.merging(baseDict, uniquingKeysWith: { _, newFromFile in newFromFile })
+               }
+          }
+
             
             // Ensure tokenizer_class is set if not present after merge or if no fallback merge happened
             if effectiveDict["tokenizer_class"] == nil && !(effectiveDict["tokenizer_class"] is NSNull) {
@@ -117,12 +121,13 @@ public class LanguageModelConfigurationFromHub {
         }
     }
 
-    public var modelType: String? {
-        get async throws {
-            // Use the .string() method from the main Config
-            try await modelConfig.modelType?.string()
-        }
-    }
+public var modelType: String? {
+      get async throws {
+          // Access modelType property and get its string value
+          try await modelConfig.modelType?.string()
+      }
+  }
+
 
     func loadConfig(
         modelName: String,
@@ -143,13 +148,14 @@ public class LanguageModelConfigurationFromHub {
         let tokenizerData = try hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer.json"))
         var tokenizerConfigFromFile = try? hubApi.configuration(fileURL: modelFolder.appending(path: "tokenizer_config.json"))
         
-     if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
-         let chatTemplate = chatTemplateConfig.chatTemplate { // Use direct property access
+    if let chatTemplateConfig = try? hubApi.configuration(fileURL: modelFolder.appending(path: "chat_template.json")),
+         let chatTemplate = chatTemplateConfig.chatTemplate?.string() { // Get string value from Config
           
           var tempDict: [String: Any] = [:]
           if let currentTokenizerConfig = tokenizerConfigFromFile {
-              if let dict = currentTokenizerConfig.toJinjaCompatible() as? [String: Any] {
-                  tempDict = dict
+              let jinjaValue = currentTokenizerConfig.jinjaValue()
+              if case let .object(objectValue) = jinjaValue {
+                  tempDict = objectValue.dictionary
               }
           }
           tempDict["chat_template"] = chatTemplate
@@ -157,6 +163,7 @@ public class LanguageModelConfigurationFromHub {
           let nsStringDict = Dictionary(uniqueKeysWithValues: tempDict.map { (NSString(string: $0.key), $0.value) })
           tokenizerConfigFromFile = Config(nsStringDict) // Recreate Config with the new chat_template
       }
+
         
         return Configurations(
             modelConfig: modelConfig,
